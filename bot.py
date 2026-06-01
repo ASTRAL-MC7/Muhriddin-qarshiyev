@@ -1,9 +1,14 @@
 import os
 import logging
+import asyncio
+
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
-    Application, CommandHandler, CallbackQueryHandler,
-    ContextTypes, ChatJoinRequestHandler
+    Application,
+    CommandHandler,
+    CallbackQueryHandler,
+    ChatJoinRequestHandler,
+    ContextTypes,
 )
 from telegram.error import TelegramError
 
@@ -13,45 +18,46 @@ logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
 
 TOKEN = os.getenv("BOT_TOKEN")
-WEBHOOK = os.getenv("WEBHOOK_URL")
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 
-CHANNEL1 = "@Milliy_sertifikat_lider"
-CHANNEL2 = -1003945305522
-GIFT = -1003763206013
+CHANNEL_1 = "@Milliy_sertifikat_lider"
+CHANNEL_2 = -1003945305522
+GIFT_CHANNEL = -1003763206013
 
-REQ = 5
-ADMIN = {6987211321, 5523761749}
-BOT = "msliderbot"
+REQUIRED = 5
 
-
-def link(uid):
-    return f"https://t.me/{BOT}?start=ref{uid}"
+ADMIN_IDS = {6987211321, 5523761749}
+BOT_USERNAME = "msliderbot"
 
 
-async def c1(bot, uid):
+def ref_link(uid: int):
+    return f"https://t.me/{BOT_USERNAME}?start=ref{uid}"
+
+
+async def check_ch1(bot, uid):
     try:
-        m = await bot.get_chat_member(CHANNEL1, uid)
-        return m.status in ("member", "creator", "administrator")
-    except:
+        m = await bot.get_chat_member(CHANNEL_1, uid)
+        return m.status in ("member", "administrator", "creator")
+    except TelegramError:
         return False
 
 
-async def c2(bot, uid):
+async def check_ch2(bot, uid):
     try:
-        m = await bot.get_chat_member(CHANNEL2, uid)
-        if m.status in ("member", "creator", "administrator"):
+        m = await bot.get_chat_member(CHANNEL_2, uid)
+        if m.status in ("member", "administrator", "creator"):
             return True
-    except:
+    except TelegramError:
         pass
+
     return db.has_join(uid)
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    u = update.effective_user
-    uid = u.id
-    name = u.first_name or "user"
+    user = update.effective_user
+    uid = user.id
 
-    db.add_user(uid, name)
+    db.add_user(uid, user.first_name or "User")
 
     if context.args and context.args[0].startswith("ref"):
         try:
@@ -62,89 +68,108 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             pass
 
     if db.is_verified(uid):
-        if db.ref_count(uid) >= REQ:
-            await update.message.reply_text("🎁 Sovg‘a tayyor")
+        c = db.ref_count(uid)
+        if c >= REQUIRED:
+            await update.message.reply_text("🎁 Sovg'a tayyor!")
         else:
-            await show_ref(update, uid)
+            await send_ref(update, uid)
         return
 
     kb = [
         [
-            InlineKeyboardButton("1-kanal", url=f"https://t.me/{CHANNEL1[1:]}"),
+            InlineKeyboardButton("1-kanal", url=f"https://t.me/{CHANNEL_1[1:]}"),
             InlineKeyboardButton("2-kanal", url="https://t.me/+zfIZNpX9BLplMTBi")
         ],
-        [InlineKeyboardButton("Tasdiqlash", callback_data="v")]
+        [InlineKeyboardButton("Tasdiqlash", callback_data="verify")]
     ]
 
     await update.message.reply_text(
-        f"Assalomu alaykum {name}",
+        "Assalomu alaykum!",
         reply_markup=InlineKeyboardMarkup(kb)
     )
 
 
-async def show_ref(update, uid):
+async def send_ref(update, uid):
     c = db.ref_count(uid)
     await update.message.reply_text(
-        f"Referal: {link(uid)}\n{c}/{REQ}"
+        f"Referral: {ref_link(uid)}\n{c}/{REQUIRED}"
     )
 
 
-async def verify(update: Update, context):
+async def verify(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     uid = q.from_user.id
     await q.answer()
 
-    if not await c1(context.bot, uid):
-        await q.answer("1-kanal yo‘q", show_alert=True)
+    if not await check_ch1(context.bot, uid):
+        await q.answer("1-kanal yo'q", show_alert=True)
         return
 
-    if not await c2(context.bot, uid):
-        await q.answer("2-kanal request yo‘q", show_alert=True)
+    if not await check_ch2(context.bot, uid):
+        await q.answer("2-kanal request yo'q", show_alert=True)
         return
 
     db.verify(uid)
 
-    await q.edit_message_text("Tasdiqlandi")
-    await show_ref(q, uid)
+    await q.edit_message_text("✅ Tasdiqlandi")
+    await send_ref(q, uid)
 
 
-async def join(update: Update, context):
+async def join_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
     r = update.chat_join_request
-    if r.chat.id == CHANNEL2:
+    if r.chat.id == CHANNEL_2:
         db.add_join(r.from_user.id)
 
 
-async def gift(update: Update, context):
+async def gift(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     uid = q.from_user.id
     await q.answer()
 
-    if db.has_join(uid) and db.ref_count(uid) >= REQ:
-        try:
-            link = await context.bot.create_chat_invite_link(
-                GIFT, member_limit=1
-            )
-            await q.edit_message_text(link.invite_link)
-        except:
-            await q.answer("error", show_alert=True)
-    else:
-        await q.answer("yetarli emas", show_alert=True)
+    if db.has_received_gift(uid):
+        await q.answer("Allaqachon olgansiz", show_alert=True)
+        return
+
+    if db.ref_count(uid) < REQUIRED:
+        await q.answer("Yetarli referral yo'q", show_alert=True)
+        return
+
+    try:
+        link = await context.bot.create_chat_invite_link(
+            GIFT_CHANNEL,
+            member_limit=1
+        )
+
+        db.mark_gift_received(uid)
+
+        await q.edit_message_text(f"🎁 Link: {link.invite_link}")
+
+    except TelegramError:
+        await q.answer("Xatolik", show_alert=True)
 
 
 def main():
     app = Application.builder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CallbackQueryHandler(verify, pattern="v"))
-    app.add_handler(ChatJoinRequestHandler(join))
+    app.add_handler(CallbackQueryHandler(verify, pattern="verify"))
     app.add_handler(CallbackQueryHandler(gift, pattern="gift"))
+    app.add_handler(ChatJoinRequestHandler(join_request))
 
-    app.run_webhook(
-        listen="0.0.0.0",
-        port=int(os.getenv("PORT", 10000)),
-        webhook_url=f"{WEBHOOK}/webhook",
-        url_path="webhook"
-    )
+    async def run():
+        await app.initialize()
+        await app.start()
+
+        await app.updater.start_webhook(
+            listen="0.0.0.0",
+            port=int(os.getenv("PORT", 10000)),
+            webhook_url=f"{WEBHOOK_URL}/webhook",
+            url_path="webhook",
+        )
+
+        await app.updater.idle()
+
+    asyncio.run(run())
 
 
 if __name__ == "__main__":
