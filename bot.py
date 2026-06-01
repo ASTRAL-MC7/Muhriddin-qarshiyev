@@ -8,7 +8,7 @@ from telegram.ext import (
     ContextTypes, MessageHandler, filters
 )
 from telegram.error import TelegramError
-from database import db
+import database as db
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
