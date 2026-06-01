@@ -10,8 +10,7 @@ from telegram.error import TelegramError
 import database as db
 
 logging.basicConfig(level=logging.INFO)
-log = logging.getLogger(**name**)
-
+log = logging.getLogger(__name__)
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 
