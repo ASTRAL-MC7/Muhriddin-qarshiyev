@@ -2,8 +2,8 @@ import os
 import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
-Application, CommandHandler, CallbackQueryHandler,
-ContextTypes, ChatJoinRequestHandler
+    Application, CommandHandler, CallbackQueryHandler,
+    ContextTypes, ChatJoinRequestHandler
 )
 from telegram.error import TelegramError
 
@@ -11,212 +11,141 @@ import database as db
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 
-CHANNEL_1 = "@Milliy_sertifikat_lider"
-CHANNEL_2_ID = -1003945305522
-GIFT_CHANNEL_ID = -1003763206013
+TOKEN = os.getenv("BOT_TOKEN")
+WEBHOOK = os.getenv("WEBHOOK_URL")
 
-REQUIRED_REF = 5
+CHANNEL1 = "@Milliy_sertifikat_lider"
+CHANNEL2 = -1003945305522
+GIFT = -1003763206013
 
-ADMIN_IDS = {6987211321, 5523761749}
-BOT_USERNAME = "msliderbot"
+REQ = 5
+ADMIN = {6987211321, 5523761749}
+BOT = "msliderbot"
 
-def ref_link(user_id: int):
-return f"https://t.me/{BOT_USERNAME}?start=ref{user_id}"
 
-async def check_channel1(bot, user_id: int):
-try:
-m = await bot.get_chat_member(CHANNEL_1, user_id)
-return m.status in ("member", "administrator", "creator")
-except TelegramError:
-return False
+def link(uid):
+    return f"https://t.me/{BOT}?start=ref{uid}"
 
-async def check_channel2(bot, user_id: int):
-try:
-m = await bot.get_chat_member(CHANNEL_2_ID, user_id)
-if m.status in ("member", "administrator", "creator"):
-return True
-except TelegramError:
-pass
 
-```
-return db.has_join_request(user_id)
-```
+async def c1(bot, uid):
+    try:
+        m = await bot.get_chat_member(CHANNEL1, uid)
+        return m.status in ("member", "creator", "administrator")
+    except:
+        return False
+
+
+async def c2(bot, uid):
+    try:
+        m = await bot.get_chat_member(CHANNEL2, uid)
+        if m.status in ("member", "creator", "administrator"):
+            return True
+    except:
+        pass
+    return db.has_join(uid)
+
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-user = update.effective_user
-uid = user.id
-name = user.first_name or "Do'st"
+    u = update.effective_user
+    uid = u.id
+    name = u.first_name or "user"
 
-```
-db.register_user(uid, name)
+    db.add_user(uid, name)
 
-args = context.args
+    if context.args and context.args[0].startswith("ref"):
+        try:
+            ref = int(context.args[0][3:])
+            if ref != uid:
+                db.add_ref(ref, uid)
+        except:
+            pass
 
-if args and args[0].startswith("ref"):
-    try:
-        ref = int(args[0][3:])
-        if ref != uid:
-            db.add_referral(ref, uid)
-    except:
-        pass
+    if db.is_verified(uid):
+        if db.ref_count(uid) >= REQ:
+            await update.message.reply_text("🎁 Sovg‘a tayyor")
+        else:
+            await show_ref(update, uid)
+        return
 
-if db.is_verified(uid):
-    count = db.get_referral_count(uid)
+    kb = [
+        [
+            InlineKeyboardButton("1-kanal", url=f"https://t.me/{CHANNEL1[1:]}"),
+            InlineKeyboardButton("2-kanal", url="https://t.me/+zfIZNpX9BLplMTBi")
+        ],
+        [InlineKeyboardButton("Tasdiqlash", callback_data="v")]
+    ]
 
-    if count >= REQUIRED_REF:
-        await update.message.reply_text("🎁 Siz tayyorsiz. Sovg'ani oling.")
-    else:
-        await send_ref_msg(update, uid)
-    return
-
-text = (
-    f"Assalomu alaykum {name}, botga xush kelibsiz.\n\n"
-    "Davom etish uchun kanallarga a'zo bo'ling."
-)
-
-keyboard = [
-    [
-        InlineKeyboardButton("1-Kanal", url=f"https://t.me/{CHANNEL_1.lstrip('@')}"),
-        InlineKeyboardButton("2-Kanal", url="https://t.me/+zfIZNpX9BLplMTBi")
-    ],
-    [InlineKeyboardButton("Tasdiqlash", callback_data="verify")]
-]
-
-await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
-```
-
-async def send_ref_msg(update, uid):
-link = ref_link(uid)
-count = db.get_referral_count(uid)
-left = max(0, REQUIRED_REF - count)
-
-```
-await update.message.reply_text(
-    f"5 ta do'st taklif qiling.\n\n"
-    f"Sizning link: {link}\n"
-    f"{count}/{REQUIRED_REF} | yana {left}"
-)
-```
-
-async def verify(update: Update, context: ContextTypes.DEFAULT_TYPE):
-q = update.callback_query
-uid = q.from_user.id
-
-```
-await q.answer("Tekshirilmoqda...")
-
-if not await check_channel1(context.bot, uid):
-    await q.answer("1-kanalga a'zo bo'ling", show_alert=True)
-    return
-
-if not await check_channel2(context.bot, uid):
-    await q.answer("2-kanalga request yuboring", show_alert=True)
-    return
-
-db.set_verified(uid)
-
-await q.edit_message_text("✅ Tasdiqlandingiz")
-
-await send_ref_msg(q, uid)
-```
-
-async def join_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
-req = update.chat_join_request
-
-```
-if req.chat.id == CHANNEL_2_ID:
-    db.record_join_request(req.from_user.id)
-```
-
-async def get_gift(update: Update, context: ContextTypes.DEFAULT_TYPE):
-q = update.callback_query
-uid = q.from_user.id
-
-```
-await q.answer()
-
-if db.has_received_gift(uid):
-    await q.answer("Allaqachon olgansiz", show_alert=True)
-    return
-
-if db.get_referral_count(uid) < REQUIRED_REF:
-    await q.answer("Yetarli referral yo'q", show_alert=True)
-    return
-
-try:
-    link = await context.bot.create_chat_invite_link(
-        GIFT_CHANNEL_ID,
-        member_limit=1
+    await update.message.reply_text(
+        f"Assalomu alaykum {name}",
+        reply_markup=InlineKeyboardMarkup(kb)
     )
 
-    db.mark_gift_received(uid)
 
-    await q.edit_message_text(f"🎁 Link: {link.invite_link}")
+async def show_ref(update, uid):
+    c = db.ref_count(uid)
+    await update.message.reply_text(
+        f"Referal: {link(uid)}\n{c}/{REQ}"
+    )
 
-except TelegramError:
-    await q.answer("Xatolik", show_alert=True)
-```
 
-async def panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-if update.effective_user.id not in ADMIN_IDS:
-return
+async def verify(update: Update, context):
+    q = update.callback_query
+    uid = q.from_user.id
+    await q.answer()
 
-```
-await update.message.reply_text(
-    "/odam - users\n/xabar - broadcast"
-)
-```
+    if not await c1(context.bot, uid):
+        await q.answer("1-kanal yo‘q", show_alert=True)
+        return
 
-async def odam(update: Update, context: ContextTypes.DEFAULT_TYPE):
-if update.effective_user.id not in ADMIN_IDS:
-return
+    if not await c2(context.bot, uid):
+        await q.answer("2-kanal request yo‘q", show_alert=True)
+        return
 
-```
-count = db.get_user_count()
-await update.message.reply_text(f"Users: {count}")
-```
+    db.verify(uid)
 
-async def xabar(update: Update, context: ContextTypes.DEFAULT_TYPE):
-if update.effective_user.id not in ADMIN_IDS:
-return
+    await q.edit_message_text("Tasdiqlandi")
+    await show_ref(q, uid)
 
-```
-msg = " ".join(context.args)
-users = db.get_all_user_ids()
 
-for u in users:
-    try:
-        await context.bot.send_message(u, msg)
-    except:
-        pass
-```
+async def join(update: Update, context):
+    r = update.chat_join_request
+    if r.chat.id == CHANNEL2:
+        db.add_join(r.from_user.id)
+
+
+async def gift(update: Update, context):
+    q = update.callback_query
+    uid = q.from_user.id
+    await q.answer()
+
+    if db.has_join(uid) and db.ref_count(uid) >= REQ:
+        try:
+            link = await context.bot.create_chat_invite_link(
+                GIFT, member_limit=1
+            )
+            await q.edit_message_text(link.invite_link)
+        except:
+            await q.answer("error", show_alert=True)
+    else:
+        await q.answer("yetarli emas", show_alert=True)
+
 
 def main():
-app = Application.builder().token(BOT_TOKEN).build()
+    app = Application.builder().token(TOKEN).build()
 
-```
-app.add_handler(CommandHandler("start", start))
-app.add_handler(CommandHandler("panel", panel))
-app.add_handler(CommandHandler("odam", odam))
-app.add_handler(CommandHandler("xabar", xabar))
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CallbackQueryHandler(verify, pattern="v"))
+    app.add_handler(ChatJoinRequestHandler(join))
+    app.add_handler(CallbackQueryHandler(gift, pattern="gift"))
 
-app.add_handler(CallbackQueryHandler(verify, pattern="verify"))
-app.add_handler(CallbackQueryHandler(get_gift, pattern="gift"))
+    app.run_webhook(
+        listen="0.0.0.0",
+        port=int(os.getenv("PORT", 10000)),
+        webhook_url=f"{WEBHOOK}/webhook",
+        url_path="webhook"
+    )
 
-app.add_handler(ChatJoinRequestHandler(join_request))
 
-port = int(os.getenv("PORT", 10000))
-
-app.run_webhook(
-    listen="0.0.0.0",
-    port=port,
-    webhook_url=f"{WEBHOOK_URL}/webhook",
-    url_path="webhook"
-)
-```
-
-if **name** == "**main**":
-main()
+if __name__ == "__main__":
+    main()
